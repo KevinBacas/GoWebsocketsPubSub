@@ -1,52 +1,65 @@
 package main
 
 import (
-  "net/http"
+  "bytes"
 
   log "github.com/Sirupsen/logrus"
-  "golang.org/x/net/websocket"
-  "github.com/carbocation/interpose"
-  "github.com/carbocation/interpose/middleware"
-  "github.com/gorilla/mux"
+  "github.com/valyala/fasthttp"
 )
 
 var baseURL string  = "/go/src/hello/"
 var conn *ConnectionManager
 
-func EchoServer(ws *websocket.Conn) {
-	log.WithFields(log.Fields{
-    "object": "Server",
-  }).Info("Connected!")
-  log.WithFields(log.Fields{
-    "object": "Server",
-  }).Info("Adding user to ConnectionManager")
-  err := conn.AddUser(NewUser(ws))
-  if(err == nil) {
-    var err error = nil
-    for err == nil {
-      var message MessageRequest
-      err = websocket.JSON.Receive(ws, &message)
-      if err == nil {
-        log.WithFields(log.Fields{
-          "object": "Server",
-          "message": message,
-        }).Info("Received from client")
-        reply := NewMessageResponse(message.Message)
-        log.WithFields(log.Fields{
-          "object": "Server",
-          "reply": reply,
-        }).Info("Sending to clients")
-        conn.Broadcast(reply)
-      } else {
-        log.WithFields(log.Fields{
-          "object": "Server",
-          "error": err,
-        }).Error("Can't receive")
-      }
+var (
+  staticPrefix  = []byte("/static/")
+  staticHandler = fasthttp.FSHandler(baseURL+"static/", 1)
+)
+
+// func EchoServer(ws *websocket.Conn) {
+// 	log.WithFields(log.Fields{
+//     "object": "Server",
+//   }).Info("Connected!")
+//   log.WithFields(log.Fields{
+//     "object": "Server",
+//   }).Info("Adding user to ConnectionManager")
+//   err := conn.AddUser(NewUser(ws))
+//   if(err == nil) {
+//     var err error = nil
+//     for err == nil {
+//       var message MessageRequest
+//       err = websocket.JSON.Receive(ws, &message)
+//       if err == nil {
+//         log.WithFields(log.Fields{
+//           "object": "Server",
+//           "message": message,
+//         }).Info("Received from client")
+//         reply := NewMessageResponse(message.Message)
+//         log.WithFields(log.Fields{
+//           "object": "Server",
+//           "reply": reply,
+//         }).Info("Sending to clients")
+//         conn.Broadcast(reply)
+//       } else {
+//         log.WithFields(log.Fields{
+//           "object": "Server",
+//           "error": err,
+//         }).Error("Can't receive")
+//       }
+//     }
+//   } else {
+//     log.Error(err)
+//   }
+// }
+
+// Main request handler
+func requestHandler(ctx *fasthttp.RequestCtx) {
+    path := ctx.Path()
+    switch {
+    case bytes.HasPrefix(path, staticPrefix):
+        staticHandler(ctx)
+    default:
+        staticHandler(ctx)
     }
-  } else {
-    log.Error(err)
-  }
 }
 
 func main() {
@@ -56,24 +69,9 @@ func main() {
   })
   // log.SetLevel(log.WarnLevel)
 
-  conn = NewConnectionManager(nil)
-
-  log.Info("Configuring main Router")
-	router := mux.NewRouter()
-  router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-    http.ServeFile(w, r, baseURL+"index.html")
-  })
-  router.Handle("/echo", websocket.Handler(EchoServer))
-  router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(baseURL+"static/"))))
-
-  log.Info("Adding logging middleware")
-  middle := interpose.New()
-	middle.Use(middleware.GorillaLog())
-	middle.UseHandler(router)
-
   log.Info("Starting server...")
-  err := http.ListenAndServe(":8000", middle)
+  err := fasthttp.ListenAndServe(":8000", requestHandler)
   if err != nil {
-      panic("ListenAndServe: " + err.Error())
+    log.Fatalf("Error in server: %s", err)
   }
 }
